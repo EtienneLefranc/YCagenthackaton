@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { AppShell } from '../components/AppShell.jsx'
-import { generateInvestorsWithAnthropic } from '../lib/anthropic.js'
+import { generateInvestorsWithAnthropic, generatePitchDeckWithAnthropic } from '../lib/anthropic.js'
 
 const sections = [
   {
@@ -65,6 +65,9 @@ export function Dashboard() {
   const [isLoading, setIsLoading] = useState(false)
   const [investors, setInvestors] = useState([])
   const [error, setError] = useState('')
+  const [pitchSlides, setPitchSlides] = useState([])
+  const [pitchLoading, setPitchLoading] = useState(false)
+  const [pitchError, setPitchError] = useState('')
 
   return (
     <AppShell>
@@ -122,7 +125,7 @@ export function Dashboard() {
             </div>
           )}
 
-          {active !== 'profile' && active !== 'connections' && (
+          {active !== 'profile' && active !== 'connections' && active !== 'pitch' && (
             <div className="glass rounded-2xl p-6 md:p-8">
               <div className="font-display text-xl mb-3">Coming alive</div>
               <p className="subtle">We’ll wire this to your AI operator next. For the hackathon demo, this showcases the UX and flow cleanly.</p>
@@ -130,6 +133,84 @@ export function Dashboard() {
                 <button className="btn-primary">Generate</button>
                 <button className="btn-ghost">Configure</button>
               </div>
+            </div>
+          )}
+
+          {active === 'pitch' && (
+            <div className="glass rounded-2xl p-6 md:p-8">
+              <div className="text-xl mb-2" style={{fontFamily:'Space Grotesk, ui-sans-serif, system-ui'}}>Pitch deck (auto‑draft)</div>
+              <p className="subtle mb-4">Grounded in your profile. Clean structure. Edit after generation as needed.</p>
+
+              <div className="flex gap-3 mb-6">
+                <button
+                  className="btn-primary"
+                  onClick={async () => {
+                    setPitchError('')
+                    setPitchLoading(true)
+                    setPitchSlides([])
+                    try {
+                      const apiKey = (window?.ANTHROPIC_API_KEY || import.meta.env.VITE_ANTHROPIC_API_KEY || '').trim()
+                      const slides = await generatePitchDeckWithAnthropic({ profile, apiKey })
+                      setPitchSlides(Array.isArray(slides) ? slides : [])
+                    } catch (e) {
+                      setPitchError(e?.message || 'Failed to generate pitch deck')
+                    } finally {
+                      setPitchLoading(false)
+                    }
+                  }}
+                >
+                  {pitchLoading ? 'Generating…' : 'Generate'}
+                </button>
+                <button className="btn-ghost" onClick={() => setPitchSlides([])}>Clear</button>
+              </div>
+
+              {pitchError && (
+                <div className="rounded-xl border border-pink-500/30 bg-pink-500/10 p-3 text-sm mb-4">{pitchError}</div>
+              )}
+
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <AnimatePresence>
+                  {pitchSlides.map((s, idx) => (
+                    <motion.div
+                      key={idx}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
+                      transition={{ duration: 0.25 }}
+                      className="rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.06] to-white/[0.03] p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-white/70 text-xs">Slide {s?.number || idx + 1}</div>
+                          <div className="text-white font-medium">{s?.title || 'Untitled'}</div>
+                        </div>
+                        <div className="text-xs rounded-full px-2 py-1 bg-purple-400/15 border border-purple-400/20 text-white/80">
+                          {String(s?.subtitle || '').slice(0, 24) || 'Overview'}
+                        </div>
+                      </div>
+                      {s?.subtitle && (
+                        <div className="text-white/70 text-sm mt-2">{s.subtitle}</div>
+                      )}
+                      <ul className="mt-3 space-y-2 list-disc list-inside text-sm text-white/90">
+                        {(Array.isArray(s?.bullets) ? s.bullets : String(s?.bullets || '').split(/\n|•|\-/).filter(Boolean)).slice(0, 6).map((b, i) => (
+                          <li key={i}>{String(b).trim()}</li>
+                        ))}
+                      </ul>
+                      {s?.metrics && typeof s.metrics === 'object' && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {Object.entries(s.metrics).slice(0, 6).map(([k, v]) => (
+                            <span key={k} className="text-xs rounded-full px-2 py-1 bg-white/5 border border-white/10">{k}: {String(v)}</span>
+                          ))}
+                        </div>
+                      )}
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+
+              {!pitchLoading && pitchSlides.length === 0 && !pitchError && (
+                <div className="text-white/60 text-sm">Click Generate to draft 12 structured slides.</div>
+              )}
             </div>
           )}
 
