@@ -3,6 +3,7 @@ from flask_cors import CORS
 import requests
 import json
 import logging
+from market_research import MarketResearchGenerator
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -245,6 +246,72 @@ def ollama_status():
     """
     status = check_ollama_status()
     return jsonify(status)
+
+@app.route('/api/generate-report', methods=['POST'])
+def generate_report_endpoint():
+    """
+    Generate a comprehensive market research report using the MarketResearchGenerator
+    """
+    try:
+        # Get the problem statement and user answers from the request
+        data = request.get_json()
+        
+        if not data or 'problem_statement' not in data or 'user_answers' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'Problem statement and user answers are required'
+            }), 400
+        
+        problem_statement = data['problem_statement'].strip()
+        user_answers = data['user_answers']
+        
+        # Validate inputs
+        if not problem_statement:
+            return jsonify({
+                'success': False,
+                'error': 'Problem statement cannot be empty'
+            }), 400
+        
+        if not user_answers or not isinstance(user_answers, list) or len(user_answers) == 0:
+            return jsonify({
+                'success': False,
+                'error': 'User answers must be a non-empty list'
+            }), 400
+        
+        # Initialize the market research generator
+        generator = MarketResearchGenerator()
+        
+        # Validate inputs using the generator's validation method
+        validation = generator.validate_inputs(problem_statement, user_answers)
+        if not validation['valid']:
+            return jsonify({
+                'success': False,
+                'error': f'Input validation failed: {", ".join(validation["errors"])}'
+            }), 400
+        
+        # Generate the report
+        report_result = generator.generate_report(problem_statement, user_answers)
+        
+        if report_result['success']:
+            return jsonify({
+                'success': True,
+                'problem_statement': problem_statement,
+                'report': report_result['report'],
+                'generation_method': report_result['generation_method'],
+                'model_used': report_result['model_used']
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': report_result['error']
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"Error generating report: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Internal server error occurred'
+        }), 500
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
