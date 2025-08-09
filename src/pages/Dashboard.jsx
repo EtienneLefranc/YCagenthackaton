@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { AppShell } from '../components/AppShell.jsx'
 import { marketResearchService } from '../services/marketResearchService.js'
+import { generateInvestorsWithAnthropic, generatePitchDeckWithAnthropic } from '../lib/anthropic.js'
 
 const sections = [
   {
@@ -90,11 +91,11 @@ export function Dashboard() {
       if (report.success) {
         setMarketReport(report)
       } else {
-        throw new Error(report.error || 'Failed to generate report')
+        setMarketError(report.error || 'Failed to generate market research report')
       }
-    } catch (err) {
-      const errorMessage = err.message || 'Failed to generate market research report'
-      setMarketError(errorMessage)
+    } catch (error) {
+      console.error('Market research error:', error)
+      setMarketError('An error occurred while generating the market research report')
     } finally {
       setIsGeneratingReport(false)
     }
@@ -858,6 +859,158 @@ export function Dashboard() {
               </div>
             </div>
           )}
+
+          {active === 'pitch' && (
+            <div className="glass rounded-2xl p-6 md:p-8">
+              <div className="text-xl mb-2" style={{fontFamily:'Space Grotesk, ui-sans-serif, system-ui'}}>Pitch deck (auto‑draft)</div>
+              <p className="subtle mb-4">Grounded in your profile. Clean structure. Edit after generation as needed.</p>
+
+              <div className="flex gap-3 mb-6">
+                <button
+                  className="btn-primary"
+                  onClick={async () => {
+                    setPitchError('')
+                    setPitchLoading(true)
+                    setPitchSlides([])
+                    try {
+                      const apiKey = (window?.ANTHROPIC_API_KEY || import.meta.env.VITE_ANTHROPIC_API_KEY || '').trim()
+                      const slides = await generatePitchDeckWithAnthropic({ profile, apiKey })
+                      setPitchSlides(Array.isArray(slides) ? slides : [])
+                    } catch (e) {
+                      setPitchError(e?.message || 'Failed to generate pitch deck')
+                    } finally {
+                      setPitchLoading(false)
+                    }
+                  }}
+                >
+                  {pitchLoading ? 'Generating…' : 'Generate'}
+                </button>
+                <button className="btn-ghost" onClick={() => setPitchSlides([])}>Clear</button>
+              </div>
+
+              {pitchError && (
+                <div className="rounded-xl border border-pink-500/30 bg-pink-500/10 p-3 text-sm mb-4">{pitchError}</div>
+              )}
+
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <AnimatePresence>
+                  {pitchSlides.map((s, idx) => (
+                    <motion.div
+                      key={idx}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
+                      transition={{ duration: 0.25 }}
+                      className="rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.06] to-white/[0.03] p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-white/70 text-xs">Slide {s?.number || idx + 1}</div>
+                          <div className="text-white font-medium">{s?.title || 'Untitled'}</div>
+                        </div>
+                        <div className="text-xs rounded-full px-2 py-1 bg-purple-400/15 border border-purple-400/20 text-white/80">
+                          {String(s?.subtitle || '').slice(0, 24) || 'Overview'}
+                        </div>
+                      </div>
+                      {s?.subtitle && (
+                        <div className="text-white/70 text-sm mt-2">{s.subtitle}</div>
+                      )}
+                      <ul className="mt-3 space-y-2 list-disc list-inside text-sm text-white/90">
+                        {(Array.isArray(s?.bullets) ? s.bullets : String(s?.bullets || '').split(/\n|•|\-/).filter(Boolean)).slice(0, 6).map((b, i) => (
+                          <li key={i}>{String(b).trim()}</li>
+                        ))}
+                      </ul>
+                      {s?.metrics && typeof s.metrics === 'object' && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {Object.entries(s.metrics).slice(0, 6).map(([k, v]) => (
+                            <span key={k} className="text-xs rounded-full px-2 py-1 bg-white/5 border border-white/10">{k}: {String(v)}</span>
+                          ))}
+                        </div>
+                      )}
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+
+              {!pitchLoading && pitchSlides.length === 0 && !pitchError && (
+                <div className="text-white/60 text-sm">Click Generate to draft 12 structured slides.</div>
+              )}
+            </div>
+          )}
+
+          {active === 'connections' && (
+            <div className="glass rounded-2xl p-6 md:p-8">
+              <div className="text-xl mb-2" style={{fontFamily:'Space Grotesk, ui-sans-serif, system-ui'}}>High‑value investors</div>
+              <p className="subtle mb-4">Curated to your profile. We’ll prioritize warm intros from your graph next.</p>
+              <div className="flex gap-3 mb-6">
+                <button
+                  className="btn-primary"
+                  onClick={async () => {
+                    setError('')
+                    setIsLoading(true)
+                    setInvestors([])
+                    try {
+                      const apiKey = (window?.ANTHROPIC_API_KEY || import.meta.env.VITE_ANTHROPIC_API_KEY || '').trim()
+                      const enrichedProfile = {
+                        ...profile,
+                        // Derive a rough stage hint from launchWeeks
+                        stage_hint:
+                          profile.launchWeeks === '1-2' || profile.launchWeeks === '3-4'
+                            ? 'pre-seed'
+                            : profile.launchWeeks === '5-8'
+                              ? 'seed'
+                              : 'seed-or-series-a',
+                      }
+                      const results = await generateInvestorsWithAnthropic({ profile: enrichedProfile, apiKey })
+                      setInvestors(results)
+                    } catch (e) {
+                      setError(e?.message || 'Failed to generate')
+                    } finally {
+                      setIsLoading(false)
+                    }
+                  }}
+                >
+                  {isLoading ? 'Generating…' : 'Generate'}
+                </button>
+                <button className="btn-ghost" onClick={() => setInvestors([])}>Clear</button>
+              </div>
+
+              {error && <div className="rounded-xl border border-pink-500/30 bg-pink-500/10 p-3 text-sm">{error}</div>}
+
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {investors.map((inv, idx) => (
+                  <div key={idx} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="text-white font-medium">{inv.name || 'Unknown'}</div>
+                        <div className="text-white/70 text-sm">{inv.role || ''}{inv.role && inv.firm ? ' · ' : ''}{inv.firm || ''}</div>
+                      </div>
+                      <div className="text-xs rounded-full px-2 py-1 bg-purple-400/15 border border-purple-400/20 text-white/80">{(inv.geo || 'Global')}</div>
+                    </div>
+                    {inv.why_match && <div className="text-white/80 text-sm mt-3">{inv.why_match}</div>}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {(inv.sectors || []).slice(0,3).map((s) => (
+                        <span key={s} className="text-xs rounded-full px-2 py-1 bg-white/5 border border-white/10">{s}</span>
+                      ))}
+                      {(inv.stages || []).slice(0,2).map((s) => (
+                        <span key={s} className="text-xs rounded-full px-2 py-1 bg-white/5 border border-white/10">{s}</span>
+                      ))}
+                    </div>
+                    <div className="mt-4 flex items-center gap-2 text-sm">
+                      {inv?.links?.linkedin && <a className="btn-ghost" href={inv.links.linkedin} target="_blank" rel="noreferrer">LinkedIn</a>}
+                      {inv?.links?.twitter && <a className="btn-ghost" href={inv.links.twitter} target="_blank" rel="noreferrer">Twitter</a>}
+                      {inv?.links?.website && <a className="btn-ghost" href={inv.links.website} target="_blank" rel="noreferrer">Website</a>}
+                      {inv?.links?.email && <a className="btn-primary" href={`mailto:${inv.links.email}`}>Email</a>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {!isLoading && investors.length === 0 && !error && (
+                <div className="text-white/60 text-sm">Click Generate to see a curated list.</div>
+              )}
+            </div>
+          )}
         </section>
       </div>
     </AppShell>
@@ -872,5 +1025,4 @@ function Field({ label, value, full = false }) {
     </div>
   )
 }
-
 
