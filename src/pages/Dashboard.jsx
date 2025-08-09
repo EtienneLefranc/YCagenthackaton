@@ -68,6 +68,46 @@ export function Dashboard() {
   const [pitchSlides, setPitchSlides] = useState([])
   const [pitchLoading, setPitchLoading] = useState(false)
   const [pitchError, setPitchError] = useState('')
+  const [apiKeyInput, setApiKeyInput] = useState(() => {
+    try { return sessionStorage.getItem('glowup-anthropic-key') || '' } catch { return '' }
+  })
+
+  function getAnthropicKey() {
+    const stored = (() => { try { return sessionStorage.getItem('glowup-anthropic-key') || '' } catch { return '' } })()
+    return (
+      stored ||
+      (typeof window !== 'undefined' ? (window.ANTHROPIC_API_KEY || '') : '') ||
+      (import.meta.env.VITE_ANTHROPIC_API_KEY || '')
+    ).trim()
+  }
+
+  function KeySaver() {
+    const hasKey = !!getAnthropicKey()
+    if (hasKey) return null
+    return (
+      <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 p-3 mb-4">
+        <div className="text-sm text-white/80 mb-2">Add your Anthropic API key (stored locally for this session)</div>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            type="password"
+            className="input flex-1"
+            placeholder="sk-ant-..."
+            value={apiKeyInput}
+            onChange={(e) => setApiKeyInput(e.target.value)}
+          />
+          <button
+            className="btn-primary"
+            onClick={() => {
+              try { sessionStorage.setItem('glowup-anthropic-key', (apiKeyInput || '').trim()) } catch {}
+            }}
+          >
+            Save key (local)
+          </button>
+        </div>
+        <div className="text-xs text-white/60 mt-2">Tip: For dev, you can also use <code>VITE_ANTHROPIC_API_KEY</code> in a .env file.</div>
+      </div>
+    )
+  }
 
   return (
     <AppShell>
@@ -141,6 +181,8 @@ export function Dashboard() {
               <div className="text-xl mb-2" style={{fontFamily:'Space Grotesk, ui-sans-serif, system-ui'}}>Pitch deck (auto‑draft)</div>
               <p className="subtle mb-4">Grounded in your profile. Clean structure. Edit after generation as needed.</p>
 
+              <KeySaver />
+
               <div className="flex gap-3 mb-6">
                 <button
                   className="btn-primary"
@@ -149,7 +191,7 @@ export function Dashboard() {
                     setPitchLoading(true)
                     setPitchSlides([])
                     try {
-                      const apiKey = (window?.ANTHROPIC_API_KEY || import.meta.env.VITE_ANTHROPIC_API_KEY || '').trim()
+                      const apiKey = getAnthropicKey()
                       const slides = await generatePitchDeckWithAnthropic({ profile, apiKey })
                       setPitchSlides(Array.isArray(slides) ? slides : [])
                     } catch (e) {
@@ -218,6 +260,7 @@ export function Dashboard() {
             <div className="glass rounded-2xl p-6 md:p-8">
               <div className="text-xl mb-2" style={{fontFamily:'Space Grotesk, ui-sans-serif, system-ui'}}>High‑value investors</div>
               <p className="subtle mb-4">Curated to your profile. We’ll prioritize warm intros from your graph next.</p>
+              <KeySaver />
               <div className="flex gap-3 mb-6">
                 <button
                   className="btn-primary"
@@ -226,7 +269,7 @@ export function Dashboard() {
                     setIsLoading(true)
                     setInvestors([])
                     try {
-                      const apiKey = (window?.ANTHROPIC_API_KEY || import.meta.env.VITE_ANTHROPIC_API_KEY || '').trim()
+                      const apiKey = getAnthropicKey()
                       const enrichedProfile = {
                         ...profile,
                         // Derive a rough stage hint from launchWeeks
