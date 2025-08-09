@@ -16,14 +16,15 @@ CORS(app)
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_MODEL = "mistral:latest"  # You can change this to any model you have in Ollama
 
-def call_ollama(prompt, model=OLLAMA_MODEL):
+def call_ollama(prompt, model=OLLAMA_MODEL, prompt_type="questions"):
     """
-    Call Ollama API to generate questions using local LLM.
-    This is the core function that uses AI to generate intelligent questions.
+    Call Ollama API to generate content using local LLM.
+    This function can generate either questions or market research reports.
     """
     try:
-        # Prepare the prompt for the LLM
-        system_prompt = """You are a market research expert. Generate 5-8 simple, clear questions to understand a business problem.
+        # Prepare the system prompt based on the type of content needed
+        if prompt_type == "questions":
+            system_prompt = """You are a market research expert. Generate 5-8 simple, clear questions to understand a business problem.
 
 Focus on these key areas:
 1. What industry/market is this?
@@ -44,9 +45,18 @@ Return ONLY a JSON array like this:
     "order": 1
   }
 ]"""
+        else:  # report generation
+            system_prompt = """You are an expert market research analyst. Generate a comprehensive market research report based on the problem statement provided.
 
+Focus on providing actionable insights, market analysis, competitive landscape, customer insights, and strategic recommendations.
+
+Write the report in a professional, structured format with clear sections and bullet points where appropriate."""
+        
         # Combine system prompt with user input
-        full_prompt = f"{system_prompt}\n\nProblem Statement: {prompt}\n\nGenerate questions:"
+        if prompt_type == "questions":
+            full_prompt = f"{system_prompt}\n\nProblem Statement: {prompt}\n\nGenerate questions:"
+        else:
+            full_prompt = f"{system_prompt}\n\n{prompt}"
 
         # Call Ollama API
         response = requests.post(
@@ -58,58 +68,71 @@ Return ONLY a JSON array like this:
                 "options": {
                     "temperature": 0.3,
                     "top_p": 0.8,
-                    "max_tokens": 800
+                    "max_tokens": 800 if prompt_type == "questions" else 2000
                 }
             },
-            timeout=15
+            timeout=30
         )
         
         if response.status_code == 200:
             result = response.json()
             generated_text = result.get('response', '')
             
-            # Try to extract JSON from the response
-            try:
-                # Find JSON array in the response
-                start_idx = generated_text.find('[')
-                end_idx = generated_text.rfind(']') + 1
-                
-                if start_idx != -1 and end_idx != -1:
-                    json_str = generated_text[start_idx:end_idx]
-                    questions = json.loads(json_str)
+            if prompt_type == "questions":
+                # Try to extract JSON from the response for questions
+                try:
+                    # Find JSON array in the response
+                    start_idx = generated_text.find('[')
+                    end_idx = generated_text.rfind(']') + 1
                     
-                    # Validate and clean the questions
-                    cleaned_questions = []
-                    for i, q in enumerate(questions):
-                        if isinstance(q, dict) and 'question' in q:
-                            cleaned_question = {
-                                'id': q.get('id', f'q_{i+1}'),
-                                'question': q.get('question', ''),
-                                'type': q.get('type', 'text'),
-                                'required': q.get('required', True),
-                                'order': q.get('order', i+1),
-                                'options': q.get('options', []) if q.get('type') == 'select' else None
-                            }
-                            cleaned_questions.append(cleaned_question)
-                    
-                    return cleaned_questions
-                else:
-                    logger.warning("No JSON array found in LLM response")
+                    if start_idx != -1 and end_idx != -1:
+                        json_str = generated_text[start_idx:end_idx]
+                        questions = json.loads(json_str)
+                        
+                        # Validate and clean the questions
+                        cleaned_questions = []
+                        for i, q in enumerate(questions):
+                            if isinstance(q, dict) and 'question' in q:
+                                cleaned_question = {
+                                    'id': q.get('id', f'q_{i+1}'),
+                                    'question': q.get('question', ''),
+                                    'type': q.get('type', 'text'),
+                                    'required': q.get('required', True),
+                                    'order': q.get('order', i+1),
+                                    'options': q.get('options', []) if q.get('type') == 'select' else None
+                                }
+                                cleaned_questions.append(cleaned_question)
+                        
+                        return cleaned_questions
+                    else:
+                        logger.warning("No JSON array found in LLM response")
+                        return generate_fallback_questions(prompt)
+                        
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse JSON from LLM response: {e}")
                     return generate_fallback_questions(prompt)
-                    
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse JSON from LLM response: {e}")
-                return generate_fallback_questions(prompt)
+            else:
+                # For report generation, return the text directly
+                return generated_text
         else:
             logger.error(f"Ollama API call failed: {response.status_code}")
-            return generate_fallback_questions(prompt)
+            if prompt_type == "questions":
+                return generate_fallback_questions(prompt)
+            else:
+                return None
             
     except requests.exceptions.RequestException as e:
         logger.error(f"Error calling Ollama API: {e}")
-        return generate_fallback_questions(prompt)
+        if prompt_type == "questions":
+            return generate_fallback_questions(prompt)
+        else:
+            return None
     except Exception as e:
         logger.error(f"Unexpected error in Ollama call: {e}")
-        return generate_fallback_questions(prompt)
+        if prompt_type == "questions":
+            return generate_fallback_questions(prompt)
+        else:
+            return None
 
 def generate_fallback_questions(problem_statement):
     """
@@ -220,7 +243,7 @@ def generate_questions_endpoint():
             }), 400
         
         # Use Ollama to generate intelligent questions
-        questions = call_ollama(problem_statement)
+        questions = call_ollama(problem_statement, prompt_type="questions")
         
         # Return the generated questions
         return jsonify({
@@ -256,14 +279,14 @@ def generate_report_endpoint():
         # Get the problem statement and user answers from the request
         data = request.get_json()
         
-        if not data or 'problem_statement' not in data or 'user_answers' not in data:
+        if not data or 'problem_statement' not in data:
             return jsonify({
                 'success': False,
-                'error': 'Problem statement and user answers are required'
+                'error': 'Problem statement is required'
             }), 400
         
         problem_statement = data['problem_statement'].strip()
-        user_answers = data['user_answers']
+        user_answers = data.get('user_answers', [])  # Make user_answers optional
         
         # Validate inputs
         if not problem_statement:
@@ -272,11 +295,9 @@ def generate_report_endpoint():
                 'error': 'Problem statement cannot be empty'
             }), 400
         
-        if not user_answers or not isinstance(user_answers, list) or len(user_answers) == 0:
-            return jsonify({
-                'success': False,
-                'error': 'User answers must be a non-empty list'
-            }), 400
+        # If no user answers provided, create a basic report from just the problem statement
+        if not user_answers or len(user_answers) == 0:
+            return generate_basic_report(problem_statement)
         
         # Initialize the market research generator
         generator = MarketResearchGenerator()
@@ -287,7 +308,7 @@ def generate_report_endpoint():
             return jsonify({
                 'success': False,
                 'error': f'Input validation failed: {", ".join(validation["errors"])}'
-            }), 400
+            }), 500
         
         # Generate the report
         report_result = generator.generate_report(problem_statement, user_answers)
@@ -312,6 +333,144 @@ def generate_report_endpoint():
             'success': False,
             'error': 'Internal server error occurred'
         }), 500
+
+def generate_basic_report(problem_statement):
+    """
+    Generate a basic market research report from just the problem statement
+    """
+    try:
+        # Initialize the market research generator
+        generator = MarketResearchGenerator()
+        
+        # Create a comprehensive prompt for generating a structured MBA-worthy report
+        prompt = f"""You are an expert market research analyst and MBA consultant. Based on the problem statement below, generate a comprehensive, structured market research report that would be suitable for MBA-level analysis.
+
+PROBLEM STATEMENT:
+{problem_statement}
+
+Please generate a detailed, structured market research report with the following EXACT format and structure:
+
+## Executive Summary
+- Brief overview of the problem and market opportunity
+- Key findings and recommendations
+- Market size and growth potential
+
+## Market Analysis & Market Maps
+- Market size and growth potential with specific numbers
+- Industry trends and drivers
+- Market segmentation with percentages
+- Geographic market breakdown
+- Market maturity analysis
+
+## Ideal Customer Profile (ICP)
+- Primary target customer segments with detailed characteristics
+- Customer pain points and needs
+- Customer behavior and preferences
+- Customer acquisition channels
+- Customer lifetime value estimates
+
+## Competitive Landscape Breakdown
+- Key competitors categorized by type (Enterprise, Mid-market, SMB)
+- Competitive positioning matrix
+- Market share analysis with percentages
+- Competitive advantages and disadvantages
+- Pricing comparison table
+- Feature comparison matrix
+
+## Pricing Guidance & Business Model
+- Pricing strategy recommendations
+- Pricing tiers and structure
+- Revenue model suggestions
+- Cost structure analysis
+- Profitability projections
+- Pricing sensitivity analysis
+
+## Strategic Recommendations
+- Go-to-market strategy
+- Implementation roadmap with timelines
+- Risk mitigation strategies
+- Success metrics and KPIs
+
+## Financial Projections
+- Market penetration assumptions
+- Revenue projections (3-5 years)
+- Customer acquisition costs
+- Break-even analysis
+
+Make the report professional, data-driven, and actionable. Include specific numbers, percentages, and data points where possible. Structure the information in a way that's easy to read and analyze. Focus on providing actionable insights for business strategy and decision-making.
+
+Format the report with clear sections, bullet points, and structured information that can be easily parsed and displayed in a web interface."""
+
+        # Try to use Claude API first, fallback to Ollama if no API key
+        if generator.api_key:
+            report_content = generator.call_claude_api(prompt)
+            generation_method = 'claude_ai_direct'
+        else:
+            # Use Ollama as fallback
+            logger.info("No Anthropic API key found, using Ollama as fallback")
+            report_content = call_ollama(prompt, prompt_type="report")
+            generation_method = 'ollama_llm_fallback'
+        
+        if report_content:
+            # Parse the report content to extract structured sections
+            structured_report = parse_report_sections(report_content)
+            
+            return jsonify({
+                'success': True,
+                'problem_statement': problem_statement,
+                'report': report_content,
+                'structured_report': structured_report,
+                'generation_method': generation_method,
+                'model_used': generator.model if generator.api_key else 'mistral:latest'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to generate report using available AI services'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error generating basic report: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Internal error: {str(e)}'
+        }), 500
+
+def parse_report_sections(report_content):
+    """
+    Parse the report content to extract structured sections for better frontend display
+    """
+    try:
+        sections = {}
+        current_section = None
+        current_content = []
+        
+        lines = report_content.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Check if this is a section header
+            if line.startswith('## '):
+                # Save previous section if exists
+                if current_section and current_content:
+                    sections[current_section] = '\n'.join(current_content).strip()
+                
+                # Start new section
+                current_section = line[3:].strip()  # Remove '## '
+                current_content = []
+            elif current_section and line:
+                current_content.append(line)
+        
+        # Save the last section
+        if current_section and current_content:
+            sections[current_section] = '\n'.join(current_content).strip()
+        
+        return sections
+        
+    except Exception as e:
+        logger.error(f"Error parsing report sections: {str(e)}")
+        return {'Full Report': report_content}
 
 @app.route('/api/health', methods=['GET'])
 def health_check():

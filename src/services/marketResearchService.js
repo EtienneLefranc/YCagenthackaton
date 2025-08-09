@@ -86,20 +86,26 @@ export const marketResearchService = {
   /**
    * Generate a market research report using the market research generator
    * @param {string} problemStatement - The business problem statement
-   * @param {Array} userAnswers - Array of question-answer pairs
+   * @param {Array} userAnswers - Array of question-answer pairs (optional)
    * @returns {Promise<Object>} - Generated market research report
    */
-  async generateReport(problemStatement, userAnswers) {
+  async generateReport(problemStatement, userAnswers = null) {
     try {
+      const requestBody = {
+        problem_statement: problemStatement
+      }
+      
+      // Only add user_answers if they are provided
+      if (userAnswers && Array.isArray(userAnswers) && userAnswers.length > 0) {
+        requestBody.user_answers = userAnswers
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/generate-report`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          problem_statement: problemStatement,
-          user_answers: userAnswers
-        })
+        body: JSON.stringify(requestBody)
       })
 
       if (!response.ok) {
